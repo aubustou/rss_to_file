@@ -10,7 +10,7 @@ DOWNLOAD_WAIT = 0.2
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser = argparse.ArgumentParser(description="Gather files from RSS flow.")
     parser.add_argument("url", help="URL to RSS")
     args = parser.parse_args()
 
