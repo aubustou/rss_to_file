@@ -14,12 +14,14 @@ DOWNLOAD_WAIT = 0.2
 RSS_LINK_PATTERN = re.compile(r"&id=([0-9]+)&")
 DL_LINK_PATTERN = re.compile(r"\?id=([0-9]+)&")
 
-LAST_DLED_ID_FOLDER = Path().home() / ".config" /"rss_to_file"
+LAST_DLED_ID_FOLDER = Path().home() / ".config" / "rss_to_file"
+
 
 def main():
     parser = argparse.ArgumentParser(description="Gather files from RSS flow.")
     parser.add_argument("url", help="URL to RSS")
     args = parser.parse_args()
+    print(args.url)
 
     category_id = RSS_LINK_PATTERN.search(args.url).groups()[0]
 
@@ -59,7 +61,7 @@ def main():
             if current_id <= previous_latest_id:
                 break
             driver.get(url)
-            time.sleep(DOWNLOAD_WAIT + random.randint(0,10)*0.1)
+            time.sleep(DOWNLOAD_WAIT + random.randint(0, 10) * 0.1)
 
     if latest_id is not None:
         last_dled_id_file.write_text(str(latest_id))
