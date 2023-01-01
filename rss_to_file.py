@@ -101,7 +101,7 @@ def main():
     base_url = config["base_url"]
 
     options = uc.ChromeOptions()
-    options.add_argument("--user-data-dir={CONFIG_FOLDER}/profile2")
+    options.add_argument(f"--user-data-dir={CONFIG_FOLDER}/profile2")
     options.add_argument("--no-first-run --no-service-autorun --password-store=basic")
     driver = uc.Chrome(options=options)
 
