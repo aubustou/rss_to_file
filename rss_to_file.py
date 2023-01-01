@@ -1,71 +1,126 @@
+from __future__ import annotations
+
 import argparse
+import json
+import logging
 import random
 import re
 import time
 from pathlib import Path
-from pprint import pprint
+from typing import TypedDict, cast
 
 import undetected_chromedriver.v2 as uc
 from bs4 import BeautifulSoup
+from typing_extensions import NotRequired
 
-HTML_DIV_ID = "webkit-xml-viewer-source-xml"
+HTML_DIV_ID = "top_panel"
 DOWNLOAD_WAIT = 0.2
 
 RSS_LINK_PATTERN = re.compile(r"&id=([0-9]+)&")
 DL_LINK_PATTERN = re.compile(r"\?id=([0-9]+)&")
 
-LAST_DLED_ID_FOLDER = Path().home() / ".config" / "rss_to_file"
+CONFIG_FOLDER = Path().home() / ".config" / "rss_to_file"
+CONFIG_FILE = CONFIG_FOLDER / "config.json"
+
+PAGE_URL_QUERY = "&page={page}"
+
+ITEMS_PER_PAGE = 50
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Gather files from RSS flow.")
-    parser.add_argument("url", help="URL to RSS")
-    args = parser.parse_args()
-    print(args.url)
+class Category(TypedDict):
+    name: str
+    id: str
+    url: str
+    last_dled_id: NotRequired[int]
 
-    category_id = RSS_LINK_PATTERN.search(args.url).groups()[0]
 
-    LAST_DLED_ID_FOLDER.mkdir(exist_ok=True)
-    last_dled_id_file = LAST_DLED_ID_FOLDER / category_id
-    last_dled_id_file.touch()
+class Config(TypedDict):
+    base_url: str
+    categories: list[Category]
+    rss_url: str
+    passkey: str
 
-    driver = uc.Chrome()
 
-    with driver:
-        driver.get(args.url)
-
+def get_torrents(
+    base_url: str, driver: uc.Chrome, previous_latest_id: int, rss_url: str, passkey: str
+) -> int | None:
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.support.wait import WebDriverWait
 
-    WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((By.ID, HTML_DIV_ID))
-    )
-
-    soup = BeautifulSoup(driver.page_source)
-    enclosures = soup.body.div.find_all("enclosure")
-
-    urls = [x.get("url") for x in enclosures]
-    pprint(urls)
-
-    content = last_dled_id_file.read_text()
-    previous_latest_id = int(content or 0)
     latest_id = None
 
-    with driver:
-        for index, url in enumerate(urls):
-            match = DL_LINK_PATTERN.search(url)
-            current_id = int(match.groups()[0])
-            if index == 0:
-                latest_id = int(current_id)
-            if current_id <= previous_latest_id:
-                break
-            driver.get(url)
+    for page in range(0, 20):
+        url = base_url.format(page=page * ITEMS_PER_PAGE)
+        logging.info("Page: %s", url)
+        driver.get(url)
+
+        logging.info("Waiting for page %s to load...", url)
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.ID, HTML_DIV_ID))
+        )
+
+        soup = BeautifulSoup(driver.page_source)
+        table_lines = soup.find_all("a", id="get_nfo")
+        found_ids = [int(x["target"]) for x in table_lines]
+        if not found_ids:
+            logging.info("No files found.")
+            return None
+
+        for found_id in found_ids:
+            logging.info(found_id)
+            if found_id <= previous_latest_id:
+                return latest_id
+            driver.get(rss_url.format(torrent_id=found_id, passkey=passkey))
+            latest_id = found_id
             time.sleep(DOWNLOAD_WAIT + random.randint(0, 10) * 0.1)
 
-    if latest_id is not None:
-        last_dled_id_file.write_text(str(latest_id))
+            driver.get(url)
+    return latest_id
 
 
-if __name__ == "__main__":
-    main()
+def main():
+    logging.basicConfig(level=logging.INFO)
+
+    parser = argparse.ArgumentParser(description="Gather files from RSS flow.")
+    parser.add_argument(
+        "--config", help="Path to config file", default=CONFIG_FILE, type=Path
+    )
+    args = parser.parse_args()
+
+    if not (config_path := args.config.exists()) and not config_path.is_file():
+        if config_path == CONFIG_FILE:
+            CONFIG_FOLDER.mkdir(exist_ok=True, parents=True)
+            CONFIG_FILE.write_text("{}")
+            logging.info("Config file created at %s", CONFIG_FILE)
+        else:
+            logging.info("Config file %s does not exist.", config_path)
+        return
+
+    config = cast(Config, json.loads(CONFIG_FILE.read_text()))
+    base_url = config["base_url"]
+
+    options = uc.ChromeOptions()
+    options.add_argument("--user-data-dir={CONFIG_FOLDER}/profile2")
+    options.add_argument("--no-first-run --no-service-autorun --password-store=basic")
+    driver = uc.Chrome(options=options)
+
+    for category in config.get("categories", []):
+        logging.info("Category: %s", category["name"])
+
+        url = base_url + category["url"] + PAGE_URL_QUERY
+        rss_url = base_url + config["rss_url"]
+        passkey = config["passkey"]
+
+        previous_latest_id = category.get("last_dled_id", 0)
+
+        with driver:
+            latest_id = get_torrents(url, driver, previous_latest_id, rss_url, passkey)
+
+        if latest_id is not None:
+            category["last_dled_id"] = latest_id
+
+        json.dump(config, CONFIG_FILE.open("w"), indent=4)
+
+    if __name__ == "__main__":
+        main()

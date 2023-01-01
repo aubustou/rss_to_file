@@ -18,5 +18,6 @@ setup(
         "selenium>=3.141.0",
         "undetected-chromedriver",
         "beautifulsoup4>=4.9.3",
+        "typing-extensions",
     ],
 )
