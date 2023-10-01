@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import TypedDict, cast
 
-import undetected_chromedriver.v2 as uc
+import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
 from typing_extensions import NotRequired
 
@@ -25,6 +25,12 @@ CONFIG_FILE = CONFIG_FOLDER / "config.json"
 PAGE_URL_QUERY = "&page={page}"
 
 ITEMS_PER_PAGE = 50
+MAX_NUMBER_OF_PAGES = 200
+FIRST_PAGE = 0
+
+OLDEST_ID = 672701
+
+GET_ALL = False
 
 
 class Category(TypedDict):
@@ -42,7 +48,11 @@ class Config(TypedDict):
 
 
 def get_torrents(
-    base_url: str, driver: uc.Chrome, previous_latest_id: int, rss_url: str, passkey: str
+    base_url: str,
+    driver: uc.Chrome,
+    previous_latest_id: int,
+    rss_url: str,
+    passkey: str,
 ) -> int | None:
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions as EC
@@ -50,7 +60,7 @@ def get_torrents(
 
     latest_id = None
 
-    for page in range(0, 20):
+    for page in range(FIRST_PAGE, MAX_NUMBER_OF_PAGES + 1):
         url = base_url.format(page=page * ITEMS_PER_PAGE)
         logging.info("Page: %s", url)
         driver.get(url)
@@ -67,12 +77,13 @@ def get_torrents(
             logging.info("No files found.")
             return None
 
+        latest_id = max(found_ids)
+
         for found_id in found_ids:
             logging.info(found_id)
-            if found_id <= previous_latest_id:
+            if found_id <= previous_latest_id and not GET_ALL:
                 return latest_id
             driver.get(rss_url.format(torrent_id=found_id, passkey=passkey))
-            latest_id = found_id
             time.sleep(DOWNLOAD_WAIT + random.randint(0, 10) * 0.1)
 
             driver.get(url)
@@ -88,7 +99,7 @@ def main():
     )
     args = parser.parse_args()
 
-    if not (config_path := args.config.exists()) and not config_path.is_file():
+    if not (config_path := args.config).exists() and not config_path.is_file():
         if config_path == CONFIG_FILE:
             CONFIG_FOLDER.mkdir(exist_ok=True, parents=True)
             CONFIG_FILE.write_text("{}")
@@ -97,7 +108,7 @@ def main():
             logging.info("Config file %s does not exist.", config_path)
         return
 
-    config = cast(Config, json.loads(CONFIG_FILE.read_text()))
+    config = cast(Config, json.loads(config_path.read_text()))
     base_url = config["base_url"]
 
     options = uc.ChromeOptions()
@@ -120,7 +131,8 @@ def main():
         if latest_id is not None:
             category["last_dled_id"] = latest_id
 
-        json.dump(config, CONFIG_FILE.open("w"), indent=4)
+        with config_path.open("w") as f:
+            json.dump(config, f, indent=4)
 
     if __name__ == "__main__":
         main()
